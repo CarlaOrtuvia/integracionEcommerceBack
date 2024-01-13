@@ -11,5 +11,9 @@ userRouter.get("/:id", passportError('jwt'), authorization('admin'), userControl
 userRouter.put("/:id", passportError('jwt'), authorization('admin'), userController.updateUser);
 
 userRouter.delete("/:id", passportError('jwt'), authorization('admin'), userController.deleteUser);
+userRouter.post("/password-recovery", passportError('jwt'), authorization('user'), userController.requestPasswordReset);
+
+userRouter.post("/reset-password/:token", passportError('jwt'), authorization('user'), userController.resetPassword);
+
 
 export default userRouter;

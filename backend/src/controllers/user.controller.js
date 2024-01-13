@@ -1,126 +1,123 @@
 import { userModel } from "../dao/models/user.models.js";
+import { sendRecoveryMail } from "../config/nodemailer.js";
+import crypto from 'crypto';
+const recoveryLinks = {};
 
-// controladores del modelo de usuarios
-export const getUsers = async (req, res) => {
-    const {limit, page} = req.query;
-    let query = {};  
-    let options = {
-        lim: parseInt(limit) || 10,
-        pag: parseInt(page) || 1
-    };
+
+const getUsers = async (req, res) => {
+    try {
+        const user = await userModel.find();
+
+        if (user) {
+            return res.status(200).send(user);
+        }
+        res.status(400).send({ error: "Usuario no encontrado" });
+    } catch (error) {
+        res.status(500).send({ error: `Error en consultar el usuario ${error}` });
+    }
+};
+
+//2)
+const getUserById = async (req, res) => {
+    const { id } = req.params;
 
     try {
-        const users = await userModel.paginate(query, options);
-
-        if(users) {
-            return res.status(200).send(users)
+        const userId = await userModel.findById(id);
+        if (userId) {
+            return res.status(200).send(userId);
         }
-        res.status(404).send({message: 'No se encontraron usuarios'})
+        res.status(404).send({ error: "Usuario no encontrado" });
     } catch (error) {
-        res.status(500).send({message: 'Error al obtener los usuarios'})
+        res.status(500).send({ error: `Error en consultar usuario ${error}` });
     }
-}
+};
 
-export const getUser = async (req, res) => {
-    const {id} = req.params;
+//3)
+const updateUser = async (req, res) => {
+    const { id } = req.params;
+    const { first_name, last_name, age, email, password } = req.body;
 
     try {
-        const user = await userModel.findById(id);
-
-        if(user) {
-            return res.status(200).send(user)
+        const actUser = await userModel.findByIdAndUpdate(id, {
+            first_name,
+            last_name,
+            age,
+            email,
+            password,
+        });
+        if (actUser) {
+            return res.status(200).send(actUser);
         }
-        res.status(404).send({message: 'No se encontró el usuario'})
+        res.status(404).send({ error: "Usuario no encontrado" });
     } catch (error) {
-        res.status(500).send({message: 'Error al obtener el usuario'})
+        res.status(500).send({ error: `Error en actualizar el usuario ${error}` });
     }
-}
+};
 
-export const createUser = async (req, res) => {
-    const {name, lastName, email, password, role} = req.body;
-
-    try {
-        const user = await userModel.create({name, lastName, email, password, role});
-
-        if(user) {
-            return res.status(201).send(user)
-        }
-        res.status(400).send({message: 'No se pudo crear el usuario'})
-    } catch (error) {
-        if(error.code === 11000) {
-            return res.status(400).send({message: 'El email ya existe'})
-        }
-        res.status(500).send({message: 'Error al crear el usuario'})
-    }
-}
-
-export const updateUser = async (req, res) => {
-    const {id} = req.params;
-    const {name, lastName, email, password, role} = req.body;
-
-    try {
-        const user = await userModel.findByIdAndUpdate(id, {name, lastName, email, password, role}, {new: true});
-
-        if(user) {
-            return res.status(200).send(user)
-        }
-        res.status(404).send({message: 'No se encontró el usuario'})
-    } catch (error) {
-        res.status(500).send({message: 'Error al actualizar el usuario'})
-    }
-}
-
-export const deleteUser = async (req, res) => {
-    const {id} = req.params;
-
+//4)
+const deleteUser = async (req, res) => {
+    const { id } = req.params;
     try {
         const user = await userModel.findByIdAndDelete(id);
-
-        if(user) {
-            return res.status(200).send(user)
+        if (user) {
+            res.status(200).send({ user });
+        } else {
+            res.status(404).send({ error: "Error en eliminar usuario" });
         }
-        res.status(404).send({message: 'No se encontró el usuario'})
     } catch (error) {
-        res.status(500).send({message: 'Error al eliminar el usuario'})
+        res.status(400).send({ error: "Error en eliminar usuario" });
     }
-}
+};
 
-const userSignup = async (req, res) => {
+//5)
+const requestPasswordReset = async (req, res) => {
+    const { email } = req.body;
+
     try {
-        if(!req.user){
-            res.status(401).send({ resultado: 'Usuario invalido' });
+        //Token único con el fin de que no haya 2 usuarios con el mismo link de recuperación
+        const token = crypto.randomBytes(20).toString('hex');
+        recoveryLinks[token] = { email: email, timestamp: Date.now() };
+        const recoveryLink = `http://localhost:4000/api/users/reset-password/${token}`;
+        sendRecoveryMail(email, recoveryLink);
+        res.status(200).send('Correo de recuperación enviado');
+    } catch (error) {
+        res.status(500).send(`Error al enviar el mail ${error}`);
+    }
+};
+
+//6)
+const resetPassword = async (req, res) => {
+    const { token } = req.params;
+    const { newPassword, confirmNewPassword } = req.body;
+
+    try {
+        const linkData = recoveryLinks[token];
+        if (linkData && Date.now() - linkData.timestamp <= 3600000) {
+            console.log(newPassword, confirmNewPassword);
+            const { email } = linkData;
+            console.log(email);
+            console.log(token);
+            if (newPassword == confirmNewPassword) {
+                // Modificar usuario con nueva contraseña
+                delete recoveryLinks[token];
+                res.status(200).send('Contraseña modificada correctamente');
+            } else {
+                res.status(400).send('Las contraseñas deben ser idénticas');
+            }
+        } else {
+            res.status(400).send('Token inválido o expirado. Pruebe nuevamente');
         }
-
-        res.status(200).send({ resultado: 'Usuario creado exitosamente.' });
-    }
-    catch (error) {
-        console.error('Hubo un error al registrar el usuario:', error);
-        res.status(500).send({ mensaje: `Error al registrar ${error}` });
+    } catch (error) {
+        res.status(500).send(`Error al modificar contraseña ${error}`);
     }
 };
 
-const failRegister = (req, res) => {
-    console.log('Error al registrar');
-    res.status(401).send({ resultado: 'Error al registrar' });
-};
-
-const github = (req, res) => {
-    res.status(200).send({ resultado: 'Usuario creado exitosamente.' });
-};
-
-const githubCallback = (req, res) => {
-    res.status(200).send({ resultado: 'Usuario creado exitosamente.' });
-};
-
-// Exportar todas las funciones juntas
+//Exportar todas las funciones juntas
 export const userController = {
     getUsers,
-    getUser,
-    createUser,
+    getUserById,
     updateUser,
     deleteUser,
-    userSignup,
-    failRegister,
-    github,
-    githubCallback
+    requestPasswordReset,
+    resetPassword
 }
